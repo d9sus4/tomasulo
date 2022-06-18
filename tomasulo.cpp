@@ -89,7 +89,7 @@ typedef struct _reorderEntry
   int busy;         /* 空闲标志位 */
   int instr;        /* 指令 */
   int execUnit;     /* 执行单元编号 */
-  int instrStatus;  /* 指令的当前状态 */
+  int instrState;  /* 指令的当前状态 */
   int valid;        /* 表明结果是否有效的标志位 */
   int result;       /* 在提交之前临时存放结果 */
   int storeAddress; /* store指令的内存地址 */
@@ -182,7 +182,7 @@ void printState(machineState *statePtr, int memorySize)
       printf("instr %d  executionUnit '%s'  state %s  valid %d  result %d storeAddress %d\n",
              statePtr->reorderBuf[i].instr,
              unitname[statePtr->reorderBuf[i].instr, statePtr->reorderBuf[i].execUnit - 1],
-             statename[statePtr->reorderBuf[i].instrStatus],
+             statename[statePtr->reorderBuf[i].instrState],
              statePtr->reorderBuf[i].valid, statePtr->reorderBuf[i].result,
              statePtr->reorderBuf[i].storeAddress);
     }
@@ -427,7 +427,7 @@ void issueInstr(int instr, int unit, machineState *statePtr, int reorderNum)
     reorderEntry &robEntry = statePtr->reorderBuf[reorderNum];
     robEntry.busy = 1;
     robEntry.instr = instr;
-    robEntry.instrStatus = ISSUING;
+    robEntry.instrState = ISSUING;
     robEntry.valid = 0;
     robEntry.execUnit = unit;
     // 填写对应运算模块的保留站
@@ -457,7 +457,7 @@ void issueInstr(int instr, int unit, machineState *statePtr, int reorderNum)
     reorderEntry &robEntry = statePtr->reorderBuf[reorderNum];
     robEntry.busy = 1;
     robEntry.instr = instr;
-    robEntry.instrStatus = ISSUING;
+    robEntry.instrState = ISSUING;
     robEntry.valid = 0;
     robEntry.execUnit = unit;
     // 填写对应存储/运算模块的保留站
@@ -490,7 +490,7 @@ void issueInstr(int instr, int unit, machineState *statePtr, int reorderNum)
     reorderEntry &robEntry = statePtr->reorderBuf[reorderNum];
     robEntry.busy = 1;
     robEntry.instr = instr;
-    robEntry.instrStatus = ISSUING;
+    robEntry.instrState = ISSUING;
     robEntry.valid = 0;
     robEntry.execUnit = unit;
     // 填写对应运算模块的保留站
@@ -522,7 +522,7 @@ void issueInstr(int instr, int unit, machineState *statePtr, int reorderNum)
     reorderEntry &robEntry = statePtr->reorderBuf[reorderNum];
     robEntry.busy = 1;
     robEntry.instr = instr;
-    robEntry.instrStatus = ISSUING;
+    robEntry.instrState = ISSUING;
     robEntry.valid = 0;
     robEntry.execUnit = unit;
     // 填写对应运算模块的保留站
@@ -722,7 +722,7 @@ void tick(machineState *statePtr) {
     *     对内存写操作, 修改内存.
     * 在完成清空或提交操作后, 不要忘了释放保留栈并更新队列的首指针.
     */
-  if (statePtr->tailRB >= 0 && statePtr->reorderBuf[statePtr->headRB].instrStatus == COMMITTING) {
+  if (statePtr->tailRB >= 0 && statePtr->reorderBuf[statePtr->headRB].instrState == COMMITTING) {
     reorderEntry &robEntry = statePtr->reorderBuf[statePtr->headRB];
     int op = opcode(robEntry.instr);
     int result = robEntry.result;
@@ -793,20 +793,20 @@ void tick(machineState *statePtr) {
     resStation &resEntry = statePtr->reservation[i];
     if (resEntry.busy == 1) {
       reorderEntry &robEntry = statePtr->reorderBuf[resEntry.reorderNum];
-      if (robEntry.instrStatus == WRITINGRESULT) {
+      if (robEntry.instrState == WRITINGRESULT) {
         int result = getResult(resEntry, statePtr);
         updateRes(resEntry.reorderNum, statePtr, result);
         robEntry.result = result;
         printf("committing new instr!!!!! instr = %d, result = %d, unit = %d, reorderNum = %d\n", resEntry.instr, result, i+1, resEntry.reorderNum);
-        robEntry.instrStatus = COMMITTING;
+        robEntry.instrState = COMMITTING;
         resEntry.busy = 0;
-      } else if (robEntry.instrStatus == EXECUTING) {
+      } else if (robEntry.instrState == EXECUTING) {
         resEntry.exTimeLeft -= 1;
         if (resEntry.exTimeLeft == 0) {
           printf("writing new instr!!!!! instr = %d, unit = %d\n", resEntry.instr, i+1);
-          robEntry.instrStatus = WRITINGRESULT;
+          robEntry.instrState = WRITINGRESULT;
         }
-      } else if (robEntry.instrStatus == ISSUING) {
+      } else if (robEntry.instrState == ISSUING) {
         if (resEntry.Qj < 0 && resEntry.Qk < 0) {
           int op = opcode(resEntry.instr);
           if (op == BEQZ) {
@@ -819,7 +819,7 @@ void tick(machineState *statePtr) {
             resEntry.exTimeLeft = INTEXEC;
           }
           printf("executing new instr!!!!! instr = %d, unit = %d, Vj = %d, Vk = %d, extime = %d\n", resEntry.instr, i+1, resEntry.Vj, resEntry.Vk, resEntry.exTimeLeft);
-          robEntry.instrStatus = EXECUTING;
+          robEntry.instrState = EXECUTING;
         }
       }
     }

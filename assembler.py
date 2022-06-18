@@ -2,6 +2,7 @@ import argparse
 import readline
 import sys
 import re
+from ctypes import *
 
 op_names = ['lw', 'sw', 'add', 'addi', 'sub', 'and', 'andi', 'beqz', 'j', 'halt', 'noop']
 
@@ -117,6 +118,39 @@ class Assembler:
             del self.queue[0]
         
         return res
+
+def disassemble_line(instr: int):
+    op = (instr >> 26) & 0b111111
+    rhigh = (instr >> 21) & 0b11111
+    rmid = (instr >> 16) & 0b11111
+    rlow = (instr >> 11) & 0b11111
+    func = instr & 0b11111111111
+    imm = c_int32(instr << 16).value >> 16
+    offset = c_int32(instr << 6).value >> 6
+    if op == 35:
+        return "LW r%d, %d(r%d)" % (rmid, rhigh, imm)
+    elif op == 43:
+        return "SW r%d, %d(r%d)" % (rmid, rhigh, imm)
+    elif op == 0:
+        if func == 32:
+            return "ADD r%d, r%d, r%d" % (rlow, rhigh, rmid)
+        elif func == 34:
+            return "SUB r%d, r%d, r%d" % (rlow, rhigh, rmid)
+        elif func == 36:
+            return "AND r%d, r%d, r%d" % (rlow, rhigh, rmid)
+    elif op == 8:
+        return "ADDI r%d, r%d, %d" % (rmid, rhigh, imm)
+    elif op == 12:
+        return "ANDI r%d, r%d, %d" % (rmid, rhigh, imm)
+    elif op == 4:
+        return "BEQZ r%d, %d" % (rhigh, imm)
+    elif op == 2:
+        return "J %d" % (offset)
+    elif op == 1:
+        return "HALT"
+    elif op == 3:
+        return "NOOP"
+    return "UNDEFINED"
 
 
 def main():
