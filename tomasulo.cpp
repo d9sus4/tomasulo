@@ -115,10 +115,14 @@ typedef struct _machineState
   int cycles;                        /* 已经过的周期数 */
   resStation reservation[NUMUNITS];  /* 保留栈 */
   reorderEntry reorderBuf[RBSIZE];   /* ROB */
+  int headRB;
+  int tailRB;
   regResultEntry regResult[NUMREGS]; /* 寄存器状态 */
   btbEntry btBuf[BTBSIZE];           /* 分支预测缓冲栈 */
   int memory[MEMSIZE];               /* 内存   */
+  int memorySize;
   int regFile[NUMREGS];              /* 寄存器 */
+  int halt;
 } machineState;
 
 int field0(int);
@@ -127,6 +131,11 @@ int field2(int);
 int opcode(int);
 
 void printInstruction(int);
+
+extern "C" {
+  void init(machineState *statePtr, char *filename);
+  void tick(machineState *statePtr);
+}
 
 void printState(machineState *statePtr, int memorySize)
 {
@@ -610,83 +619,25 @@ int getResult(resStation rStation, machineState *statePtr)
   return -1;
 }
 
-/* 选作内容 */
-int getPrediction(machineState *statePtr)
-{
-  /*
-   * [TODO]
-   * 对给定的PC, 检查分支预测缓冲栈中是否有历史记录
-   * 如果有, 返回根据历史信息进行的预测, 否则返回-1
-   */
-}
-
-/* 选作内容 */
-void updateBTB(machineState *statePtr, int branchPC, int targetPC, int outcome)
-{
-  /*
-   * [TODO]
-   * 更新分支预测缓冲栈: 检查是否与缓冲栈中的项目匹配.
-   * 如果是, 对2-bit的历史记录进行更新;
-   * 如果不是, 将当前的分支语句添加到缓冲栈中去.
-   * 如果缓冲栈已满，你需要选择一种替换算法将旧的记录替换出去.
-   * 如果当前跳转成功, 将初始的历史状态设置为STRONGTAKEN;
-   * 如果不成功, 将历史设置为STRONGNOT
-   */
-}
-
-/* 选作内容 */
-int getTarget(machineState *statePtr, int reorderNum)
-{
-  /*
-   * [TODO]
-   * 检查分支指令是否已保存在分支预测缓冲栈中:
-   * 如果不是, 返回当前pc+1, 这意味着我们预测分支跳转不会成功;
-   * 如果在, 并且历史信息为STRONGTAKEN或WEAKTAKEN, 返回跳转的目标地址,
-   * 如果历史信息为STRONGNOT或WEAKNOT, 返回当前pc+1.
-   */
-}
-
-int main(int argc, char *argv[])
-{
+void init(machineState *statePtr, char *filename) {
   FILE *filePtr;
   int pc, done, instr, i;
   char line[MAXLINELENGTH];
-  machineState *statePtr;
-  int memorySize;
-  int success, newBuf, op, halt, unit;
-  int headRB, tailRB;
+  int success, newBuf, op, unit;
   int regA, regB, immed, address;
   int flush;
   int rbnum;
 
-  if (argc != 2)
-  {
-    printf("error: usage: %s <machine-code file>\n", argv[0]);
-    exit(1);
-  }
+  filePtr = fopen(filename, "r");
 
-  filePtr = fopen(argv[1], "r");
   if (filePtr == NULL)
   {
-    printf("error: can't open file %s", argv[1]);
+    printf("error: can't open file %s", filename);
     perror("fopen");
-    exit(1);
+    return;
   }
 
-  /*
-   * 初始化, 读输入文件等
-   *
-   */
-
-  /*
-   * 分配数据结构空间
-   */
-
-  statePtr = (machineState *)malloc(sizeof(machineState));
-
-  /*
-   * 将机器指令读入到内存中
-   */
+  // statePtr = (machineState *)malloc(sizeof(machineState));
 
   for (i = 0; i < MEMSIZE; i++)
   {
@@ -714,8 +665,8 @@ int main(int argc, char *argv[])
     }
   }
 
-  memorySize = pc;
-  halt = 0;
+  statePtr->memorySize = pc;
+  statePtr->halt = 0;
 
   /*
    * 状态初始化
@@ -736,8 +687,8 @@ int main(int argc, char *argv[])
     statePtr->reorderBuf[i].busy = 0;
   }
 
-  headRB = 0;
-  tailRB = -1;
+  statePtr->headRB = 0;
+  statePtr->tailRB = -1;
 
   for (i = 0; i < NUMREGS; i++)
   {
@@ -748,177 +699,155 @@ int main(int argc, char *argv[])
     statePtr->btBuf[i].valid = 0;
   }
 
+  return;
+}
+
+void tick(machineState *statePtr) {
+  
+  if (statePtr->halt == 1) return;
+
   /*
    * 处理指令
    */
 
-  while (1)
-  { /* 执行循环:你应该在执行halt指令时跳出这个循环 */
+  /* 执行一个循环:在执行halt指令时设置halt=1 */
 
-    printState(statePtr, memorySize);
-
-    /*
-     * 基本要求:
-     * 首先, 确定是否需要清空流水线或提交位于ROB的队首的指令.
-     * 我们处理分支跳转的缺省方法是假设跳转不成功, 如果我们的预测是错误的,
-     * 就需要清空流水线(ROB/保留栈/寄存器状态), 设置新的pc = 跳转目标.
-     * 如果不需要清空, 并且队首指令能够提交, 在这里更新状态:
-     *     对寄存器访问, 修改寄存器;
-     *     对内存写操作, 修改内存.
-     * 在完成清空或提交操作后, 不要忘了释放保留栈并更新队列的首指针.
-     */
-    if (tailRB >= 0 && statePtr->reorderBuf[headRB].instrStatus == COMMITTING) {
-      reorderEntry &robEntry = statePtr->reorderBuf[headRB];
-      int op = opcode(robEntry.instr);
-      int result = robEntry.result;
-      updateRes(headRB, statePtr, result);
-      // NOOP won't actually issue so don't consider it
-      if (op == HALT) {
-        printf("i'm halting!!!!!!!!!!!!!!!\n");
-        break;
-      } else if (op == J || op == BEQZ) { // JUMP
-        if (result >= 0) {
-          statePtr->pc = result;
-          // CLEAR EVERYTHING
-          tailRB = headRB;
-          for (int i = 0; i < RBSIZE; i ++) {
-            statePtr->reorderBuf[i].busy = 0;
-          }
-          for (int i = 0; i < NUMUNITS; i++) {
-            statePtr->reservation[i].busy = 0;
-          }
-          for (int i = 0; i < NUMREGS; i++) {
-            statePtr->regResult[i].valid = 1;
-          }
+  /*
+    * 基本要求:
+    * 首先, 确定是否需要清空流水线或提交位于ROB的队首的指令.
+    * 我们处理分支跳转的缺省方法是假设跳转不成功, 如果我们的预测是错误的,
+    * 就需要清空流水线(ROB/保留栈/寄存器状态), 设置新的pc = 跳转目标.
+    * 如果不需要清空, 并且队首指令能够提交, 在这里更新状态:
+    *     对寄存器访问, 修改寄存器;
+    *     对内存写操作, 修改内存.
+    * 在完成清空或提交操作后, 不要忘了释放保留栈并更新队列的首指针.
+    */
+  if (statePtr->tailRB >= 0 && statePtr->reorderBuf[statePtr->headRB].instrStatus == COMMITTING) {
+    reorderEntry &robEntry = statePtr->reorderBuf[statePtr->headRB];
+    int op = opcode(robEntry.instr);
+    int result = robEntry.result;
+    updateRes(statePtr->headRB, statePtr, result);
+    // NOOP won't actually issue so don't consider it
+    if (op == HALT) {
+      printf("i'm halting!!!!!!!!!\n");
+      statePtr->halt = 1;
+      return;
+    } else if (op == J || op == BEQZ) { // JUMP
+      if (result >= 0) {
+        statePtr->pc = result;
+        // CLEAR EVERYTHING
+        statePtr->tailRB = statePtr->headRB;
+        for (int i = 0; i < RBSIZE; i ++) {
+          statePtr->reorderBuf[i].busy = 0;
         }
-      } else if (op == SW) { // WRITE MEMORY
-        statePtr->memory[robEntry.storeAddress] = robEntry.result;
-      } else { // WRITE BACK
+        for (int i = 0; i < NUMUNITS; i++) {
+          statePtr->reservation[i].busy = 0;
+        }
         for (int i = 0; i < NUMREGS; i++) {
-          if (statePtr->regResult[i].valid == 0 && statePtr->regResult[i].reorderNum == headRB) {
-            statePtr->regResult[i].valid = 1;
-            statePtr->regFile[i] = robEntry.result;
-          }
+          statePtr->regResult[i].valid = 1;
         }
       }
-      statePtr->reorderBuf[headRB].busy = 0;
-      if (headRB == tailRB) {
-        headRB = 0;
-        tailRB = -1;
-      } else {
-        headRB += 1;
-      }
-      printf("instr commit finished!!!!! instr = %d, result = %d\n", robEntry.instr, robEntry.result);
-    }
-
-    /*
-     * [TODO]
-     * 选作内容:
-     * 在提交的时候, 我们知道跳转指令的最终结果.
-     * 有三种可能的情况: 预测跳转成功, 预测跳转不成功, 不能预测(因为分支预测缓冲栈中没有对应的项目).
-     * 如果我们预测跳转成功:
-     *     如果我们的预测是正确的, 只需要继续执行就可以了;
-     *     如果我们的预测是错误的, 即实际没有发生跳转, 就必须重新设置正确的PC值, 并清空流水线.
-     * 如果我们预测跳转不成功:
-     *     如果预测是正确的, 继续执行;
-     *     如果预测是错误的, 即实际上发生了跳转, 就必须将PC设置为跳转目标, 并清空流水线.
-     * 如果我们不能预测跳转是否成功:
-     *     如果跳转成功, 仍然需要清空流水线, 将PC修改为跳转目标.
-     * 在遇到分支时, 需要更新分支预测缓冲站的内容.
-     */
-
-    /*
-     * 提交完成.
-     * 检查所有保留栈中的指令, 对下列状态, 分别完成所需的操作:
-     */
-
-    /*
-     * 对Writing Result状态:
-     * 将结果复制到正在等待该结果的其他保留栈中去;
-     * 还需要将结果保存在ROB中的临时存储区中.
-     * 释放指令占用的保留栈, 将指令状态修改为Committing
-     */
-
-    /*
-     * 对Executing状态:
-     * 执行剩余时间递减;
-     * 在执行完成时, 将指令状态修改为Writing Result
-     */
-
-    /*
-     * 对Issuing状态:
-     * 检查两个操作数是否都已经准备好, 如果是, 将指令状态修改为Executing
-     */
-
-    for (int i = 0; i < NUMUNITS; i++) {
-      resStation &resEntry = statePtr->reservation[i];
-      if (resEntry.busy == 1) {
-        reorderEntry &robEntry = statePtr->reorderBuf[resEntry.reorderNum];
-        if (robEntry.instrStatus == WRITINGRESULT) {
-          int result = getResult(resEntry, statePtr);
-          updateRes(resEntry.reorderNum, statePtr, result);
-          robEntry.result = result;
-          printf("committing new instr!!!!! instr = %d, result = %d, unit = %d, reorderNum = %d\n", resEntry.instr, result, i+1, resEntry.reorderNum);
-          robEntry.instrStatus = COMMITTING;
-          resEntry.busy = 0;
-        } else if (robEntry.instrStatus == EXECUTING) {
-          resEntry.exTimeLeft -= 1;
-          if (resEntry.exTimeLeft == 0) {
-            printf("writing new instr!!!!! instr = %d, unit = %d\n", resEntry.instr, i+1);
-            robEntry.instrStatus = WRITINGRESULT;
-          }
-        } else if (robEntry.instrStatus == ISSUING) {
-          if (resEntry.Qj < 0 && resEntry.Qk < 0) {
-            int op = opcode(resEntry.instr);
-            if (op == BEQZ) {
-              resEntry.exTimeLeft = BRANCHEXEC;
-            } else if (op == LW) {
-              resEntry.exTimeLeft = LDEXEC;
-            } else if (op == SW) {
-              resEntry.exTimeLeft = STEXEC;
-            } else {
-              resEntry.exTimeLeft = INTEXEC;
-            }
-            printf("executing new instr!!!!! instr = %d, unit = %d, Vj = %d, Vk = %d, extime = %d\n", resEntry.instr, i+1, resEntry.Vj, resEntry.Vk, resEntry.exTimeLeft);
-            robEntry.instrStatus = EXECUTING;
-          }
+    } else if (op == SW) { // WRITE MEMORY
+      statePtr->memory[robEntry.storeAddress] = robEntry.result;
+    } else { // WRITE BACK
+      for (int i = 0; i < NUMREGS; i++) {
+        if (statePtr->regResult[i].valid == 0 && statePtr->regResult[i].reorderNum == statePtr->headRB) {
+          statePtr->regResult[i].valid = 1;
+          statePtr->regFile[i] = robEntry.result;
         }
       }
     }
+    statePtr->reorderBuf[statePtr->headRB].busy = 0;
+    if (statePtr->headRB == statePtr->tailRB) {
+      statePtr->headRB = 0;
+      statePtr->tailRB = -1;
+    } else {
+      statePtr->headRB += 1;
+    }
+    printf("instr commit finished!!!!! instr = %d, result = %d\n", robEntry.instr, robEntry.result);
+  }
+  /*
+    * 提交完成.
+    * 检查所有保留栈中的指令, 对下列状态, 分别完成所需的操作:
+    */
 
-    /*
-     * 最后, 当我们处理完了保留栈中的所有指令后, 检查是否能够发射一条新的指令.
-     * 首先检查是否有空闲的保留栈, 如果有, 再检查ROB中是否有空闲的空间,
-     * 如果也能找到空闲空间, 发射指令.
-     */
-    if (statePtr->pc < memorySize) {
-      int instr = statePtr->memory[statePtr->pc];
-      int unit = checkReservation(statePtr, instr);
-      int reorderNum = checkReorder(statePtr, headRB, tailRB);
-      printf("trying issuing instr = %d, unit = %d, reorderNum = %d\n", instr, unit, reorderNum);
-      if (unit >= 0 && reorderNum >= 0) {
-        printf("issuing new instr!!!!! instr = %d, unit = %d, reorderNum = %d\n", instr, unit, reorderNum);
-        issueInstr(instr, unit, statePtr, reorderNum);
-        tailRB += 1;
-        tailRB %= RBSIZE;
-        statePtr->pc += 1;
+  /*
+    * 对Writing Result状态:
+    * 将结果复制到正在等待该结果的其他保留栈中去;
+    * 还需要将结果保存在ROB中的临时存储区中.
+    * 释放指令占用的保留栈, 将指令状态修改为Committing
+    */
+
+  /*
+    * 对Executing状态:
+    * 执行剩余时间递减;
+    * 在执行完成时, 将指令状态修改为Writing Result
+    */
+
+  /*
+    * 对Issuing状态:
+    * 检查两个操作数是否都已经准备好, 如果是, 将指令状态修改为Executing
+    */
+
+  for (int i = 0; i < NUMUNITS; i++) {
+    resStation &resEntry = statePtr->reservation[i];
+    if (resEntry.busy == 1) {
+      reorderEntry &robEntry = statePtr->reorderBuf[resEntry.reorderNum];
+      if (robEntry.instrStatus == WRITINGRESULT) {
+        int result = getResult(resEntry, statePtr);
+        updateRes(resEntry.reorderNum, statePtr, result);
+        robEntry.result = result;
+        printf("committing new instr!!!!! instr = %d, result = %d, unit = %d, reorderNum = %d\n", resEntry.instr, result, i+1, resEntry.reorderNum);
+        robEntry.instrStatus = COMMITTING;
+        resEntry.busy = 0;
+      } else if (robEntry.instrStatus == EXECUTING) {
+        resEntry.exTimeLeft -= 1;
+        if (resEntry.exTimeLeft == 0) {
+          printf("writing new instr!!!!! instr = %d, unit = %d\n", resEntry.instr, i+1);
+          robEntry.instrStatus = WRITINGRESULT;
+        }
+      } else if (robEntry.instrStatus == ISSUING) {
+        if (resEntry.Qj < 0 && resEntry.Qk < 0) {
+          int op = opcode(resEntry.instr);
+          if (op == BEQZ) {
+            resEntry.exTimeLeft = BRANCHEXEC;
+          } else if (op == LW) {
+            resEntry.exTimeLeft = LDEXEC;
+          } else if (op == SW) {
+            resEntry.exTimeLeft = STEXEC;
+          } else {
+            resEntry.exTimeLeft = INTEXEC;
+          }
+          printf("executing new instr!!!!! instr = %d, unit = %d, Vj = %d, Vk = %d, extime = %d\n", resEntry.instr, i+1, resEntry.Vj, resEntry.Vk, resEntry.exTimeLeft);
+          robEntry.instrStatus = EXECUTING;
+        }
       }
     }
+  }
 
-    /*
-     * [TODO]
-     * 选作内容:
-     * 在发射跳转指令时, 将PC修改为正确的目标: 是pc = pc+1, 还是pc = 跳转目标?
-     * 在发射其他的指令时, 只需要设置pc = pc+1.
-     */
+  /*
+    * 最后, 当我们处理完了保留栈中的所有指令后, 检查是否能够发射一条新的指令.
+    * 首先检查是否有空闲的保留栈, 如果有, 再检查ROB中是否有空闲的空间,
+    * 如果也能找到空闲空间, 发射指令.
+    */
+  if (statePtr->pc < statePtr->memorySize) {
+    int instr = statePtr->memory[statePtr->pc];
+    int unit = checkReservation(statePtr, instr);
+    int reorderNum = checkReorder(statePtr, statePtr->headRB, statePtr->tailRB);
+    printf("trying issuing instr = %d, unit = %d, reorderNum = %d\n", instr, unit, reorderNum);
+    if (unit >= 0 && reorderNum >= 0) {
+      printf("issuing new instr!!!!! instr = %d, unit = %d, reorderNum = %d\n", instr, unit, reorderNum);
+      issueInstr(instr, unit, statePtr, reorderNum);
+      statePtr->tailRB += 1;
+      statePtr->tailRB %= RBSIZE;
+      statePtr->pc += 1;
+    }
+  }
 
-    /*
-     * 周期计数加1
-     */
+  /*
+    * 周期计数加1
+    */
 
-    statePtr->cycles += 1;
-
-  } /* while (1) */
-  printf("halting machine\n");
-  return 0;
+  statePtr->cycles += 1;
+  return;
 }
