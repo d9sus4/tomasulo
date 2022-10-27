@@ -403,7 +403,7 @@ class TomasuloGUI:
         self.frame_rob = ROBFrame(self.root)
         self.frame_rob.grid(row=3)
 
-        self.label_res = tk.Label(self.root, text="Reservation", pady=YPAD_TITLES)
+        self.label_res = tk.Label(self.root, text="Reservation Stations", pady=YPAD_TITLES)
         self.label_res.grid(row=4)
         self.frame_res = ResFrame(self.root)
         self.frame_res.grid(row=5)
@@ -444,8 +444,9 @@ class TomasuloGUI:
             self.value_path_hint.set("Current code file: " + self.input_file_path)
 
     def init_machine_state(self):
-        self.c_init(pointer(self.state), self.input_file_path.encode())
-        self.refresh_everything()
+        if self.input_file_path != '':
+            self.c_init(pointer(self.state), self.input_file_path.encode())
+            self.refresh_everything()
 
     def refresh_everything(self):
         self.frame_regfile.refresh(self.state.regFile, self.state.regResult)
